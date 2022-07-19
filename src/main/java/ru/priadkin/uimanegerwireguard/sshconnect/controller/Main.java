@@ -38,5 +38,17 @@ public class Main {
         }
 
     }
+    @DeleteMapping("/deleteSSHConnectionByUUID")
+    public String connectSSHByPassword(@RequestParam(name = "uuid") UUID uuid) {
+        try {
+            sessions.get(uuid).disconnect();
+            Session remove = sessions.remove(uuid);
+            return remove != null ? "Successfully disconnect and deleted session":"session does not exists";
+        } catch (Exception e) {
+            log.error(e.getMessage());
+            return "Session not deleted, try again!";
+        }
+
+    }
 
 }
