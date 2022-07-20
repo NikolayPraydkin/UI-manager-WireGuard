@@ -50,5 +50,17 @@ public class Main {
         }
 
     }
+    @DeleteMapping("/deleteAllSSHConnection")
+    public String connectSSHByPassword() {
+        try {
+            sessions.values().forEach(Session::disconnect);
+            sessions.clear();
+            return "Successfully disconnect and deleted session";
+        } catch (Exception e) {
+            log.error(e.getMessage());
+            return "Sessions not deleted, try again!";
+        }
+
+    }
 
 }
