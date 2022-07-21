@@ -5,9 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 import ru.priadkin.uimanegerwireguard.sshconnect.domain.SSH;
 
-import java.util.HashMap;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
 
 @RestController
 @RequestMapping("/")
@@ -51,7 +49,7 @@ public class Main {
 
     }
     @DeleteMapping("/deleteAllSSHConnection")
-    public String connectSSHByPassword() {
+    public String deleteAllSSHConnection() {
         try {
             sessions.values().forEach(Session::disconnect);
             sessions.clear();
@@ -61,6 +59,15 @@ public class Main {
             return "Sessions not deleted, try again!";
         }
 
+    }
+    @GetMapping("/getAllSSHConnection")
+    public Collection<Session> getAllSSHConnection() throws Exception {
+        try {
+           return sessions.values();
+        } catch (Exception e) {
+            log.error(e.getMessage());
+        }
+        throw new Exception("No one session didn't find");
     }
 
 }
