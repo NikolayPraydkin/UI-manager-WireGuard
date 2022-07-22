@@ -36,18 +36,20 @@ public class Main {
         }
 
     }
+
     @DeleteMapping("/deleteSSHConnectionByUUID")
     public String connectSSHByPassword(@RequestParam(name = "uuid") UUID uuid) {
         try {
             sessions.get(uuid).disconnect();
             Session remove = sessions.remove(uuid);
-            return remove != null ? "Successfully disconnect and deleted session":"session does not exists";
+            return remove != null ? "Successfully disconnect and deleted session" : "session does not exists";
         } catch (Exception e) {
             log.error(e.getMessage());
             return "Session not deleted, try again!";
         }
 
     }
+
     @DeleteMapping("/deleteAllSSHConnection")
     public String deleteAllSSHConnection() {
         try {
@@ -60,14 +62,33 @@ public class Main {
         }
 
     }
+
     @GetMapping("/getAllSSHConnection")
-    public Collection<Session> getAllSSHConnection() throws Exception {
+    public Map<UUID,Session> getAllSSHConnection() throws Exception {
         try {
-           return sessions.values();
+            return sessions;
         } catch (Exception e) {
             log.error(e.getMessage());
         }
         throw new Exception("No one session didn't find");
+    }
+
+    @DeleteMapping("/dropSessionByHost")
+    public String dropSessionByHost(@RequestParam(name = "host") String host) throws Exception {
+        try {
+            List<UUID> keysForDelete = new ArrayList<>();
+            sessions.forEach((k, v) -> {
+                if (v.getHost().equals(host)) {
+                    v.disconnect();
+                    keysForDelete.add(k);
+                }
+            });
+            keysForDelete.forEach(sessions::remove);
+            return "Deleted session by host " + host + " " + keysForDelete;
+        } catch (Exception e) {
+            log.error(e.getMessage());
+        }
+        throw new Exception("No one session deleted by host " + host);
     }
 
 }
