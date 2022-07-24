@@ -69,7 +69,7 @@ public class Main {
     }
 
     @GetMapping("/getAllSSHConnection")
-    public Map<UUID,Session> getAllSSHConnection() throws Exception {
+    public Map<UUID, Session> getAllSSHConnection() throws Exception {
         try {
             return sessions;
         } catch (Exception e) {
@@ -95,37 +95,99 @@ public class Main {
         }
         throw new Exception("No one session deleted by host " + host);
     }
-    @GetMapping("/checkwireguard")
-    public Status checkWiregurd(@RequestParam(name = "host") String host) throws Exception {
 
+    @GetMapping("/checkwireguard")
+    public Status checkWiregurd(@RequestParam(name = "host") String host) {
+
+        Status status = new Status();
+        sessions.forEach((k, v) -> {
+            ChannelExec channel;
+            if (v.getHost().equals(host)) {
+                try {
+                    channel = (ChannelExec) v.openChannel("exec");
+                    channel.setCommand("dpkg -s wireguard");
+                    InputStream in = channel.getInputStream();
+
+                    channel.connect();
+
+                    byte[] tmp = new byte[1024];
+                    StringBuilder builder = new StringBuilder();
+                    while (true) {
+                        while (in.available() > 0) {
+                            int i = in.read(tmp, 0, 1024);
+                            if (i < 0) break;
+                            builder.append(new String(tmp, 0, i));
+                        }
+                        if (channel.isClosed()) {
+                            if (in.available() > 0) continue;
+                            System.out.println("exit-status: " + channel.getExitStatus());
+                            break;
+                        }
+                        try {
+                            Thread.sleep(1000);
+                        } catch (Exception ee) {
+                        }
+                    }
+                    String statusWG = builder.toString();
+                    if (statusWG.contains("Status: install ok")) {
+                        status.setInstaledWireguard(true);
+                    }
+                    status.setMessage(statusWG);
+
+                    channel.disconnect();
+
+                } catch (JSchException e) {
+                    throw new RuntimeException(e);
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+        });
+        if (sessions.size() == 0) {
+            status.setMessage("No one session is connected");
+        }
+        return status;
+    }
+
+    @GetMapping("/installwireguard")
+    public Status installwg(@RequestParam(name = "host") String host) {
         Status status = new Status();
         sessions.forEach((k, v) -> {
             ChannelExec channel = null;
             if (v.getHost().equals(host)) {
                 try {
                     channel = (ChannelExec) v.openChannel("exec");
-                    channel.setCommand("dpkg -s wireguard");
-                    InputStream in=channel.getInputStream();
+                    channel.setCommand("echo poker | sudo -S apt install wireguard");
+                    InputStream in = channel.getInputStream();
+                    InputStream errStream = channel.getErrStream();
 
                     channel.connect();
-
-                    byte[] tmp=new byte[1024];
                     StringBuilder builder = new StringBuilder();
-                    while(true){
-                        while(in.available()>0){
-                            int i=in.read(tmp, 0, 1024);
-                            if(i<0)break;
+                    while (true) {
+                        while (in.available() > 0) {
+                            byte[] tmp = new byte[in.available()];
+                            int i = in.read(tmp, 0, in.available());
+                            if (i < 0) break;
                             builder.append(new String(tmp, 0, i));
                         }
-                        if(channel.isClosed()){
-                            if(in.available()>0) continue;
-                            System.out.println("exit-status: "+channel.getExitStatus());
+                        while (errStream.available() > 0) {
+                            byte[] tmper = new byte[errStream.available()];
+                            int i = errStream.read(tmper, 0, errStream.available());
+                            if (i < 0) break;
+                            builder.append(new String(tmper, 0, i));
+                        }
+                        if (channel.isClosed()) {
+                            if (in.available() > 0) continue;
+                            System.out.println("exit-status: " + channel.getExitStatus());
                             break;
                         }
-                        try{Thread.sleep(1000);}catch(Exception ee){}
+                        try {
+                            Thread.sleep(1000);
+                        } catch (Exception ee) {
+                        }
                     }
                     String statusWG = builder.toString();
-                    if(statusWG.contains("Status: install ok")){
+                    if (statusWG.contains("Уже установлен пакет wireguard") || statusWG.contains("Настраивается пакет wireguard ")) {
                         status.setInstaledWireguard(true);
                     }
                     status.setMessage(statusWG);
