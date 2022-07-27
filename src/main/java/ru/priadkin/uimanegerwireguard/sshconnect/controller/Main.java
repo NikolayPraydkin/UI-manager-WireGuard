@@ -1,9 +1,12 @@
 package ru.priadkin.uimanegerwireguard.sshconnect.controller;
 
 import com.jcraft.jsch.ChannelExec;
+import com.jcraft.jsch.ChannelShell;
 import com.jcraft.jsch.JSchException;
 import com.jcraft.jsch.Session;
 import lombok.extern.slf4j.Slf4j;
+import net.sf.expectit.Expect;
+import net.sf.expectit.ExpectBuilder;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -22,6 +25,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
+
+import static net.sf.expectit.filter.Filters.removeColors;
+import static net.sf.expectit.filter.Filters.removeNonPrintable;
+import static net.sf.expectit.matcher.Matchers.regexp;
 
 @RestController
 @RequestMapping("/")
@@ -168,7 +176,7 @@ public class Main {
             if (v.getHost().equals(host)) {
                 try {
                     channel = (ChannelExec) v.openChannel("exec");
-                    channel.setCommand("echo poker | sudo -S apt install wireguard");
+                    channel.setCommand("echo poker | sudo -S apt install -y wireguard");
                     InputStream in = channel.getInputStream();
                     InputStream errStream = channel.getErrStream();
 
@@ -226,7 +234,7 @@ public class Main {
             if (v.getHost().equals(host)) {
                 try {
                     channel = (ChannelExec) v.openChannel("exec");
-                    channel.setCommand("echo poker | sudo -S apt --purge remove -y wireguard");
+                    channel.setCommand("echo poker | sudo -S apt --purge remove -y wireguard; echo poker | sudo apt autoclean && sudo apt autoremove -y");
 
                     InputStream in = channel.getInputStream();
                     InputStream errStream = channel.getErrStream();
@@ -260,6 +268,71 @@ public class Main {
                     if (statusWG.contains("Уже установлен пакет wireguard") || statusWG.contains("Настраивается пакет wireguard ")) {
                         status.setInstaledWireguard(true);
                     }
+                    status.setMessage(statusWG);
+
+                    channel.disconnect();
+
+                } catch (JSchException e) {
+                    throw new RuntimeException(e);
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+        });
+        if (sessions.size() == 0) {
+            status.setMessage("No one session is connected");
+        }
+        return status;
+    }
+
+    @GetMapping("/generatekeyswg")
+    public Status generateKeysWG(@RequestParam(name = "host") String host, @RequestParam(name = "keyname",required = false) String keyname) {
+        String prefixNameKeys = "";
+        if(keyname == null){
+            prefixNameKeys = UUID.randomUUID().toString();
+        }else {
+            prefixNameKeys = keyname;
+        }
+        String command = String.format("wg genkey | tee /etc/wireguard/%s_privatekey | wg pubkey | tee /etc/wireguard/%s_publickey", prefixNameKeys, prefixNameKeys);
+        Status status = new Status();
+        sessions.forEach((k, v) -> {
+            ChannelShell channel = null;
+            if (v.getHost().equals(host)) {
+                try {
+                    channel = (ChannelShell) v.openChannel("shell");
+                    channel.connect();
+                    StringBuilder builder = new StringBuilder();
+                    try (
+                        Expect expect = new ExpectBuilder()
+                                .withTimeout(2, TimeUnit.SECONDS)
+                                .withOutput(channel.getOutputStream())
+                                .withInputs(channel.getInputStream(), channel.getExtInputStream())
+                                .withEchoInput(builder)
+                                .withEchoOutput(builder)
+                                .withInputFilters(removeColors(), removeNonPrintable())
+                                .withExceptionOnFailure()
+                                .build();
+                    ){
+
+                        expect.sendLine("sudo su");
+                        Thread.sleep(100);
+                        expect.expect(regexp(".*"));
+                        expect.sendLine("poker");
+                        Thread.sleep(100);
+                        expect.expect(regexp(".*"));
+                        expect.sendLine("cd /etc/wireguard");
+                        Thread.sleep(100);
+                        expect.expect(regexp(".*"));
+                        expect.sendLine(command);
+                        Thread.sleep(100);
+                        expect.expect(regexp(".*"));
+                        Thread.sleep(3000);
+                    } catch (InterruptedException e) {
+                        throw new RuntimeException(e);
+                    }
+
+                    String statusWG = builder.toString();
+
                     status.setMessage(statusWG);
 
                     channel.disconnect();
