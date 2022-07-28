@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import ru.priadkin.uimanegerwireguard.sshconnect.domain.SSH;
 import ru.priadkin.uimanegerwireguard.sshconnect.domain.Status;
+import ru.priadkin.uimanegerwireguard.sshconnect.domain.StatusWG;
 
 import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
@@ -29,6 +30,7 @@ import java.util.concurrent.TimeUnit;
 
 import static net.sf.expectit.filter.Filters.removeColors;
 import static net.sf.expectit.filter.Filters.removeNonPrintable;
+import static net.sf.expectit.matcher.Matchers.contains;
 import static net.sf.expectit.matcher.Matchers.regexp;
 
 @RestController
@@ -116,9 +118,9 @@ public class Main {
     }
 
     @GetMapping("/checkwireguard")
-    public Status checkWiregurd(@RequestParam(name = "host") String host) {
+    public StatusWG checkWiregurd(@RequestParam(name = "host") String host) {
 
-        Status status = new Status();
+        StatusWG status = new StatusWG();
         sessions.forEach((k, v) -> {
             ChannelExec channel;
             if (v.getHost().equals(host)) {
@@ -169,8 +171,8 @@ public class Main {
     }
 
     @GetMapping("/installwireguard")
-    public Status installwg(@RequestParam(name = "host") String host) {
-        Status status = new Status();
+    public StatusWG installwg(@RequestParam(name = "host") String host) {
+        StatusWG status = new StatusWG();
         sessions.forEach((k, v) -> {
             ChannelExec channel = null;
             if (v.getHost().equals(host)) {
@@ -227,8 +229,8 @@ public class Main {
     }
 
     @GetMapping("/removewireguard")
-    public Status removewg(@RequestParam(name = "host") String host) {
-        Status status = new Status();
+    public StatusWG removewg(@RequestParam(name = "host") String host) {
+        StatusWG status = new StatusWG();
         sessions.forEach((k, v) -> {
             ChannelExec channel = null;
             if (v.getHost().equals(host)) {
@@ -286,13 +288,14 @@ public class Main {
     }
 
     @GetMapping("/generatekeyswg")
-    public Status generateKeysWG(@RequestParam(name = "host") String host, @RequestParam(name = "keyname",required = false) String keyname) {
+    public Status generateKeysWG(@RequestParam(name = "host") String host, @RequestParam(name = "keyname",required = false) String keyname, @RequestParam(name = "overridekey",required = false) boolean overridekey) {
         String prefixNameKeys = "";
         if(keyname == null){
             prefixNameKeys = UUID.randomUUID().toString();
         }else {
             prefixNameKeys = keyname;
         }
+        final String fullNamePrivateKey = prefixNameKeys + "_privatekey";
         String command = String.format("wg genkey | tee /etc/wireguard/%s_privatekey | wg pubkey | tee /etc/wireguard/%s_publickey", prefixNameKeys, prefixNameKeys);
         Status status = new Status();
         sessions.forEach((k, v) -> {
@@ -323,10 +326,16 @@ public class Main {
                         expect.sendLine("cd /etc/wireguard");
                         Thread.sleep(100);
                         expect.expect(regexp(".*"));
-                        expect.sendLine(command);
-                        Thread.sleep(100);
-                        expect.expect(regexp(".*"));
-                        Thread.sleep(3000);
+                        expect.sendLine("ls");
+                        Thread.sleep(500);
+                        if (builder.toString().contains(fullNamePrivateKey) && !overridekey) {
+                                throw new Exception("Key with name " + fullNamePrivateKey + " already exists");
+                        } else {
+                            expect.sendLine(command);
+                            Thread.sleep(100);
+                            expect.expect(regexp(".*"));
+                            Thread.sleep(3000);
+                        }
                     } catch (InterruptedException e) {
                         throw new RuntimeException(e);
                     }
@@ -339,8 +348,8 @@ public class Main {
 
                 } catch (JSchException e) {
                     throw new RuntimeException(e);
-                } catch (IOException e) {
-                    throw new RuntimeException(e);
+                } catch (Exception e) {
+                    status.setMessage(e.getMessage());
                 }
             }
         });
