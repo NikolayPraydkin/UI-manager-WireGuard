@@ -17,6 +17,7 @@ import ru.priadkin.uimanegerwireguard.sshconnect.domain.SSH;
 import ru.priadkin.uimanegerwireguard.sshconnect.domain.Status;
 import ru.priadkin.uimanegerwireguard.sshconnect.domain.StatusWG;
 
+import java.io.BufferedOutputStream;
 import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -27,6 +28,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
+import java.io.StringReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -417,6 +419,48 @@ public class Main {
         });
         return status;
     }
+    @GetMapping("/getwg0conf")
+    public Status getwg0conf(@RequestParam(name = "host") String host) {
+        Status status = new Status();
+        sessions.forEach((k, v) -> {
+            ChannelShell channel;
+            if (v.getHost().equals(host)) {
+                try {
+                    channel = (ChannelShell) v.openChannel("shell");
+                    ChannelSftp sftpChannel = (ChannelSftp) v.openChannel("sftp");
+                    sftpChannel.connect();
+                    channel.connect();
+                    Expect expect = new ExpectBuilder()
+                            .withOutput(channel.getOutputStream())
+                            .withInputs(channel.getInputStream(), channel.getExtInputStream())
+                            .withEchoInput(System.out)
+                            .withEchoOutput(System.err)
+                            .withInputFilters(removeColors(), removeNonPrintable())
+                            .withExceptionOnFailure()
+                            .build();
+                    boolean isTmpFolderCreated;
+                    try {
+                        String tmpFolder = getUniqFolderName();
+                        isTmpFolderCreated = makeTmpDir(tmpFolder, v.getUserName(), expect);
+                        if (isTmpFolderCreated) {
+                            upgradeToSU(expect, "poker");
+                            ByteArrayOutputStream stream = moveFromWGFolderToOutputStream(expect,sftpChannel, v.getUserName(), tmpFolder);
+                            status.setMessage(stream.toString());
+                            removeTmpDir(tmpFolder,v.getUserName(),expect);
+                        } else {
+                            throw new Exception("TmpFolder not created!");
+                        }
+                    } finally {
+                        expect.close();
+                        channel.disconnect();
+                    }
+                } catch (Exception e) {
+                    System.out.println(e.getMessage());
+                }
+            }
+        });
+        return status;
+    }
 
     @GetMapping("/powerOff")
     public String powerOff(@RequestParam(name = "host") String host) throws Exception {
@@ -475,10 +519,12 @@ public class Main {
         }
     }
 
-    private static OutputStream moveFromWGFolderToOutputStream(ChannelSftp sftp, String userName, String tmpFolder) throws Exception {
+    private static ByteArrayOutputStream moveFromWGFolderToOutputStream(Expect expect,ChannelSftp sftp, String userName, String tmpFolder) throws Exception {
         try {
+            expect.sendLine("cp"  + " /etc/wireguard/wg0.conf" + " /home/" + userName + "/" + tmpFolder + "/wg0.conf");
+            Thread.sleep(100);
             ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
-            sftp.get(tmpFolder, byteArrayOutputStream);
+            sftp.get("/home/" + userName + "/" + tmpFolder + "/wg0.conf", byteArrayOutputStream);
             Thread.sleep(100);
             return byteArrayOutputStream;
         } catch (Exception e) {
