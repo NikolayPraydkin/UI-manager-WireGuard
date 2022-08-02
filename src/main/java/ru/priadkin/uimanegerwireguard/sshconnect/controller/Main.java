@@ -38,6 +38,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static net.sf.expectit.filter.Filters.removeColors;
 import static net.sf.expectit.filter.Filters.removeNonPrintable;
@@ -438,18 +440,9 @@ public class Main {
                             .withInputFilters(removeColors(), removeNonPrintable())
                             .withExceptionOnFailure()
                             .build();
-                    boolean isTmpFolderCreated;
                     try {
-                        String tmpFolder = getUniqFolderName();
-                        isTmpFolderCreated = makeTmpDir(tmpFolder, v.getUserName(), expect);
-                        if (isTmpFolderCreated) {
-                            upgradeToSU(expect, "poker");
-                            ByteArrayOutputStream stream = moveFromWGFolderToOutputStream(expect,sftpChannel, v.getUserName(), tmpFolder);
-                            status.setMessage(stream.toString());
-                            removeTmpDir(tmpFolder,v.getUserName(),expect);
-                        } else {
-                            throw new Exception("TmpFolder not created!");
-                        }
+                        String wg0AsString = getWG0AsString(v, sftpChannel, expect);
+                        status.setMessage(wg0AsString);
                     } finally {
                         expect.close();
                         channel.disconnect();
@@ -460,6 +453,24 @@ public class Main {
             }
         });
         return status;
+    }
+
+    private List<String> splitWG0(String conf){
+       return Stream.of(conf.split("\n")).collect(Collectors.toList());
+    }
+    private String getWG0AsString(Session v, ChannelSftp sftpChannel, Expect expect) throws Exception {
+        boolean isTmpFolderCreated;
+        String tmpFolder = getUniqFolderName();
+        String result;
+        isTmpFolderCreated = makeTmpDir(tmpFolder, v.getUserName(), expect);
+        if (isTmpFolderCreated) {
+            upgradeToSU(expect, "poker");
+            result = moveFromWGFolderToOutputStream(expect, sftpChannel, v.getUserName(), tmpFolder).toString();
+            removeTmpDir(tmpFolder, v.getUserName(), expect);
+        } else {
+            throw new Exception("TmpFolder not created!");
+        }
+        return result;
     }
 
     @GetMapping("/powerOff")
