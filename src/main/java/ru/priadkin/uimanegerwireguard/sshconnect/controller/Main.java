@@ -1,5 +1,7 @@
 package ru.priadkin.uimanegerwireguard.sshconnect.controller;
 
+import ch.qos.logback.classic.net.server.HardenedLoggingEventInputStream;
+import ch.qos.logback.core.read.ListAppender;
 import com.jcraft.jsch.ChannelExec;
 import com.jcraft.jsch.ChannelSftp;
 import com.jcraft.jsch.ChannelShell;
@@ -8,6 +10,7 @@ import com.jcraft.jsch.Session;
 import lombok.extern.slf4j.Slf4j;
 import net.sf.expectit.Expect;
 import net.sf.expectit.ExpectBuilder;
+import org.apache.commons.io.output.StringBuilderWriter;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -33,6 +36,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -454,6 +458,49 @@ public class Main {
         });
         return status;
     }
+    @GetMapping("/getAllKeys")
+    public Status getAllKeys(@RequestParam(name = "host") String host) {
+        Status status = new Status();
+        sessions.forEach((k, v) -> {
+            ChannelShell channel;
+            if (v.getHost().equals(host)) {
+                try {
+                    StringBuilder builder = new StringBuilder();
+                    channel = (ChannelShell) v.openChannel("shell");
+                    ChannelSftp sftpChannel = (ChannelSftp) v.openChannel("sftp");
+                    sftpChannel.connect();
+                    channel.connect();
+                    Expect expect = new ExpectBuilder()
+                            .withOutput(channel.getOutputStream())
+                            .withInputs(channel.getInputStream(), channel.getExtInputStream())
+                            //todo: change
+                            .withEchoInput(builder)
+                            .withEchoOutput(builder)
+                            .withInputFilters(removeColors(), removeNonPrintable())
+                            .withExceptionOnFailure()
+                            .build();
+                    try {
+
+                        upgradeToSU(expect,"poker");
+                        goToWGFolder(expect);
+                        builder.setLength(0);
+                        expect.sendLine("ls");
+                        Thread.sleep(500);
+                        //todo:think
+                        String trim = builder.toString().replaceAll("\r\n", " ").trim();
+                        List<String> privatekey = Arrays.stream(trim.split(" ")).filter(i -> i.contains("privatekey")).collect(Collectors.toList());
+                        status.setMessage(privatekey.toString());
+                    } finally {
+                        expect.close();
+                        channel.disconnect();
+                    }
+                } catch (Exception e) {
+                    System.out.println(e.getMessage());
+                }
+            }
+        });
+        return status;
+    }
 
     private List<String> splitWG0(String conf){
        return Stream.of(conf.split("\n")).collect(Collectors.toList());
@@ -526,6 +573,16 @@ public class Main {
             return true;
         } catch (Exception e) {
             log.error("Not moved file to wg folder");
+            return false;
+        }
+    }
+    private static boolean goToWGFolder(Expect expect) throws IOException {
+        try {
+            expect.sendLine("cd " + "/etc/wireguard/");
+            Thread.sleep(100);
+            return true;
+        } catch (Exception e) {
+            log.error("Not go to wg folder");
             return false;
         }
     }
