@@ -23,6 +23,7 @@ import ru.priadkin.uimanegerwireguard.sshconnect.domain.StatusWG;
 import java.io.BufferedOutputStream;
 import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
+import java.io.EOFException;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.FileWriter;
@@ -465,6 +466,7 @@ public class Main {
             ChannelShell channel;
             if (v.getHost().equals(host)) {
                 try {
+                    StringBuilder builderInput = new StringBuilder();
                     StringBuilder builder = new StringBuilder();
                     channel = (ChannelShell) v.openChannel("shell");
                     ChannelSftp sftpChannel = (ChannelSftp) v.openChannel("sftp");
@@ -473,9 +475,8 @@ public class Main {
                     Expect expect = new ExpectBuilder()
                             .withOutput(channel.getOutputStream())
                             .withInputs(channel.getInputStream(), channel.getExtInputStream())
-                            //todo: change
                             .withEchoInput(builder)
-                            .withEchoOutput(builder)
+                            .withEchoOutput(builderInput)
                             .withInputFilters(removeColors(), removeNonPrintable())
                             .withExceptionOnFailure()
                             .build();
@@ -616,9 +617,48 @@ public class Main {
         return path;
     }
 
+    /**
+     *
+     * @param publicKey - key
+     * @param ip ,sample 10.0.0.1/24
+     * @return
+     * @throws IOException
+     */
+    private static String addNewPeer(String publicKey, String ip) throws IOException {
+        String peer = """
+                [Peer]
+                PublicKey = %s
+                AllowedIPs = %s
+                """;
+       return String.format(peer, publicKey, ip);
+    }
+    private static String getKeyByName(StringBuilder builder, Expect expect, String name, boolean isPrivateKey) throws Exception {
+        String finishNameKey = isPrivateKey ? name + "_privatekey" : name + "_publickey";
+        builder.setLength(0);
+        Thread.sleep(100);
+        expect.sendLine("ls");
+        Thread.sleep(100);
+        String trim = builder.toString().replaceAll("\r\n", " ").trim();
+        List<String> privatekey = Arrays.stream(trim.split(" ")).filter(i -> i.contains(finishNameKey)).collect(Collectors.toList());
+        if(privatekey.size() == 0){
+            throw new Exception("private key not found!");
+        }
+        builder.setLength(0);
+        Thread.sleep(100);
+        expect.sendLine("cat " + finishNameKey);
+        Thread.sleep(100);
+        String result = "";
+        if(!builder.toString().isBlank()){
+            result = builder.toString().split("\r\n")[1].trim();
+        }else {
+            throw new Exception("private key exist but not find from output!");
+        }
+        return result;
+    }
+
+
     private static String getUniqFolderName() {
-        String folertmpuniq = UUID.randomUUID().toString();
-        return folertmpuniq;
+        return UUID.randomUUID().toString();
     }
 
     private boolean upgradeToSU(Expect expect, String password) {
