@@ -376,8 +376,13 @@ public class Main {
         }
         return status;
     }
+
     @GetMapping("/createwg0conf")
-    public Status createwg0conf(@RequestParam(name = "host") String host) {
+    public Status createwg0conf(@RequestParam(name = "host") String host
+            , @RequestParam(name = "namekey", required = false, defaultValue = "wg") String namekey
+            , @RequestParam(name = "ip", required = false, defaultValue = "") String ip
+            , @RequestParam(name = "overwriteexistingconf", defaultValue = "false") boolean overwrite
+    ) {
         Status status = new Status();
         sessions.forEach((k, v) -> {
             ChannelShell channel;
@@ -387,45 +392,63 @@ public class Main {
                     ChannelSftp sftpChannel = (ChannelSftp) v.openChannel("sftp");
                     sftpChannel.connect();
                     channel.connect();
+                    StringBuilder builderOut = new StringBuilder();
+                    StringBuilder builderIn = new StringBuilder();
                     Expect expect = new ExpectBuilder()
                             .withOutput(channel.getOutputStream())
                             .withInputs(channel.getInputStream(), channel.getExtInputStream())
-                            .withEchoInput(System.out)
-                            .withEchoOutput(System.err)
+                            .withEchoInput(builderIn)
+                            .withEchoOutput(builderOut)
                             .withInputFilters(removeColors(), removeNonPrintable())
                             .withExceptionOnFailure()
                             .build();
-                    boolean isTmpFolderCreated;
+                    boolean isTmpFolderCreated = false;
                     try {
                         String tmpFolder = getUniqFolderName();
-
-                        Path path = prepareRawWG0ConfFile();
-
-                        isTmpFolderCreated = makeTmpDir(tmpFolder, v.getUserName(), expect);
-
-                        if (isTmpFolderCreated) {
-                            sftpChannel.put(path.toAbsolutePath().toString(), "/home/" + v.getUserName() + "/" + tmpFolder + "/wg0.conf");
-
+                        //check exist wg0.conf
+                        boolean exists = false;
+                        try {
+                            isTmpFolderCreated = makeTmpDir(tmpFolder, v.getUserName(), expect);
                             upgradeToSU(expect, "poker");
-
-                            moveFromTmpFolderToWGFolder(expect, v.getUserName(), tmpFolder);
-
-                            removeTmpDir(tmpFolder,v.getUserName(),expect);
-
-                        } else {
-                            throw new Exception("TmpFolder not created!");
+                            goToWGFolder(expect);
+                            moveFromWGFolderToOutputStream(expect, sftpChannel, v.getUserName(), tmpFolder);
+                            exists = true;
+                        } catch (Exception e) {
                         }
+                        removeTmpDir(tmpFolder, v.getUserName(), expect);
+                        if (!exists || overwrite) {
+                            Path path = prepareRawWG0ConfFile(getKeyByName(builderIn, expect, namekey.isBlank() ? "wg" : namekey, true), ip.isBlank() ? "" : ip);
+                            downgradeToUser(expect,v.getUserName(),"poker");
+                            isTmpFolderCreated = makeTmpDir(tmpFolder, v.getUserName(), expect);
+                            if (isTmpFolderCreated) {
+                                sftpChannel.put(path.toAbsolutePath().toString(), "/home/" + v.getUserName() + "/" + tmpFolder + "/wg0.conf");
+
+                                upgradeToSU(expect, "poker");
+
+                                moveFromTmpFolderToWGFolder(expect, v.getUserName(), tmpFolder);
+
+                                removeTmpDir(tmpFolder, v.getUserName(), expect);
+
+                            } else {
+                                throw new Exception("TmpFolder not created!");
+                            }
+                        } else {
+                            status.setMessage("Wg0.conf already exist and override Not allowed!");
+                        }
+                        status.setMessage("ok");
                     } finally {
                         expect.close();
                         channel.disconnect();
+                        sftpChannel.disconnect();
                     }
                 } catch (Exception e) {
-                    System.out.println(e.getMessage());
+                    status.setMessage(e.getMessage());
                 }
             }
         });
         return status;
     }
+
     @GetMapping("/getwg0conf")
     public Status getwg0conf(@RequestParam(name = "host") String host) {
         Status status = new Status();
@@ -459,6 +482,7 @@ public class Main {
         });
         return status;
     }
+
     @GetMapping("/getAllKeys")
     public Status getAllKeys(@RequestParam(name = "host") String host) {
         Status status = new Status();
@@ -482,7 +506,7 @@ public class Main {
                             .build();
                     try {
 
-                        upgradeToSU(expect,"poker");
+                        upgradeToSU(expect, "poker");
                         goToWGFolder(expect);
                         builder.setLength(0);
                         expect.sendLine("ls");
@@ -503,9 +527,10 @@ public class Main {
         return status;
     }
 
-    private List<String> splitWG0(String conf){
-       return Stream.of(conf.split("\n")).collect(Collectors.toList());
+    private List<String> splitWG0(String conf) {
+        return Stream.of(conf.split("\n")).collect(Collectors.toList());
     }
+
     private String getWG0AsString(Session v, ChannelSftp sftpChannel, Expect expect) throws Exception {
         boolean isTmpFolderCreated;
         String tmpFolder = getUniqFolderName();
@@ -577,6 +602,7 @@ public class Main {
             return false;
         }
     }
+
     private static boolean goToWGFolder(Expect expect) throws IOException {
         try {
             expect.sendLine("cd " + "/etc/wireguard/");
@@ -588,9 +614,9 @@ public class Main {
         }
     }
 
-    private static ByteArrayOutputStream moveFromWGFolderToOutputStream(Expect expect,ChannelSftp sftp, String userName, String tmpFolder) throws Exception {
+    private static ByteArrayOutputStream moveFromWGFolderToOutputStream(Expect expect, ChannelSftp sftp, String userName, String tmpFolder) throws Exception {
         try {
-            expect.sendLine("cp"  + " /etc/wireguard/wg0.conf" + " /home/" + userName + "/" + tmpFolder + "/wg0.conf");
+            expect.sendLine("cp" + " /etc/wireguard/wg0.conf" + " /home/" + userName + "/" + tmpFolder + "/wg0.conf");
             Thread.sleep(100);
             ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
             sftp.get("/home/" + userName + "/" + tmpFolder + "/wg0.conf", byteArrayOutputStream);
@@ -602,25 +628,27 @@ public class Main {
         }
     }
 
-    private static Path prepareRawWG0ConfFile() throws IOException {
+    private static Path prepareRawWG0ConfFile(String privatekey, String ip) throws IOException {
+        String defaultIp = "10.0.0.1/24";
         String toWrite = """
                 [Interface]
-                PrivateKey = <privatekey>
-                Address = 10.0.0.1/24
+                PrivateKey = %s
+                Address = %s
+                """;
+        String end = """
                 ListenPort = 51830
                 PostUp = iptables -A FORWARD -i %i -j ACCEPT; iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
                 PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE""";
 
+        String outString = String.format(toWrite, privatekey, ip.isBlank() ? defaultIp : ip) + end;
         Path path = Paths.get("wg0.conf");
-        byte[] strToBytes = toWrite.getBytes();
-        Files.write(path, strToBytes);
+        Files.write(path, outString.getBytes());
         return path;
     }
 
     /**
-     *
      * @param publicKey - key
-     * @param ip ,sample 10.0.0.1/24
+     * @param ip        ,sample 10.0.0.1/24
      * @return
      * @throws IOException
      */
@@ -630,8 +658,9 @@ public class Main {
                 PublicKey = %s
                 AllowedIPs = %s
                 """;
-       return String.format(peer, publicKey, ip);
+        return String.format(peer, publicKey, ip);
     }
+
     private static String getKeyByName(StringBuilder builder, Expect expect, String name, boolean isPrivateKey) throws Exception {
         String finishNameKey = isPrivateKey ? name + "_privatekey" : name + "_publickey";
         builder.setLength(0);
@@ -640,7 +669,7 @@ public class Main {
         Thread.sleep(100);
         String trim = builder.toString().replaceAll("\r\n", " ").trim();
         List<String> privatekey = Arrays.stream(trim.split(" ")).filter(i -> i.contains(finishNameKey)).collect(Collectors.toList());
-        if(privatekey.size() == 0){
+        if (privatekey.size() == 0) {
             throw new Exception("private key not found!");
         }
         builder.setLength(0);
@@ -648,9 +677,9 @@ public class Main {
         expect.sendLine("cat " + finishNameKey);
         Thread.sleep(100);
         String result = "";
-        if(!builder.toString().isBlank()){
+        if (!builder.toString().isBlank()) {
             result = builder.toString().split("\r\n")[1].trim();
-        }else {
+        } else {
             throw new Exception("private key exist but not find from output!");
         }
         return result;
@@ -670,6 +699,19 @@ public class Main {
             return true;
         } catch (Exception e) {
             log.error("No upgrade to SU not created , reason ->" + e.getMessage());
+            return false;
+        }
+
+    }
+    private boolean downgradeToUser(Expect expect, String user, String password) {
+        try {
+            expect.sendLine("sudo su " + user);
+            Thread.sleep(100);
+            expect.sendLine(password);
+            Thread.sleep(100);
+            return true;
+        } catch (Exception e) {
+            log.error("No downgrade to User not created , reason ->" + e.getMessage());
             return false;
         }
 
