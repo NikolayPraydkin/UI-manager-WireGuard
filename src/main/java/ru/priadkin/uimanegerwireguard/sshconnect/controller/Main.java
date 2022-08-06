@@ -11,6 +11,7 @@ import lombok.extern.slf4j.Slf4j;
 import net.sf.expectit.Expect;
 import net.sf.expectit.ExpectBuilder;
 import org.apache.commons.io.output.StringBuilderWriter;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -22,6 +23,7 @@ import ru.priadkin.uimanegerwireguard.sshconnect.domain.StatusWG;
 
 import java.io.BufferedOutputStream;
 import java.io.BufferedReader;
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.EOFException;
 import java.io.File;
@@ -418,7 +420,7 @@ public class Main {
                         removeTmpDir(tmpFolder, v.getUserName(), expect);
                         if (!exists || overwrite) {
                             Path path = prepareRawWG0ConfFile(getKeyByName(builderIn, expect, namekey.isBlank() ? "wg" : namekey, true), ip.isBlank() ? "" : ip);
-                            downgradeToUser(expect,v.getUserName(),"poker");
+                            downgradeToUser(expect, v.getUserName(), "poker");
                             isTmpFolderCreated = makeTmpDir(tmpFolder, v.getUserName(), expect);
                             if (isTmpFolderCreated) {
                                 sftpChannel.put(path.toAbsolutePath().toString(), "/home/" + v.getUserName() + "/" + tmpFolder + "/wg0.conf");
@@ -453,21 +455,15 @@ public class Main {
     public Status getwg0conf(@RequestParam(name = "host") String host) {
         Status status = new Status();
         sessions.forEach((k, v) -> {
-            ChannelShell channel;
             if (v.getHost().equals(host)) {
                 try {
-                    channel = (ChannelShell) v.openChannel("shell");
+                    ChannelShell channel = (ChannelShell) v.openChannel("shell");
                     ChannelSftp sftpChannel = (ChannelSftp) v.openChannel("sftp");
                     sftpChannel.connect();
                     channel.connect();
-                    Expect expect = new ExpectBuilder()
-                            .withOutput(channel.getOutputStream())
-                            .withInputs(channel.getInputStream(), channel.getExtInputStream())
-                            .withEchoInput(System.out)
-                            .withEchoOutput(System.err)
-                            .withInputFilters(removeColors(), removeNonPrintable())
-                            .withExceptionOnFailure()
-                            .build();
+                    StringBuilder builderIn = new StringBuilder();
+                    StringBuilder builderOut = new StringBuilder();
+                    Expect expect = getExpect(channel, builderIn, builderOut);
                     try {
                         String wg0AsString = getWG0AsString(v, sftpChannel, expect);
                         status.setMessage(wg0AsString);
@@ -481,6 +477,71 @@ public class Main {
             }
         });
         return status;
+    }
+
+    @GetMapping("/addPeerToWg0")
+    public Status addpeertowg0(@RequestParam(name = "host") String host, @RequestParam(name = "name") String name) {
+        Status status = new Status();
+        sessions.forEach((k, v) -> {
+            if (v.getHost().equals(host)) {
+                try {
+                    ChannelShell channel = (ChannelShell) v.openChannel("shell");
+                    ChannelSftp sftpChannel = (ChannelSftp) v.openChannel("sftp");
+                    sftpChannel.connect();
+                    channel.connect();
+                    StringBuilder builderIn = new StringBuilder();
+                    StringBuilder builderOut = new StringBuilder();
+                    Expect expect = getExpect(channel, builderIn, builderOut);
+                    try {
+                        addPeerToWg0Conf(v,expect,channel,sftpChannel, builderIn, name);
+                    } finally {
+                        expect.close();
+                        channel.disconnect();
+                    }
+                } catch (Exception e) {
+                    System.out.println(e.getMessage());
+                }
+            }
+        });
+        return status;
+    }
+
+    private boolean addPeerToWg0Conf(Session session, Expect expect, ChannelShell channel, ChannelSftp sftpChannel,StringBuilder builder, String name) throws Exception {
+        String wg0AsString = getWG0AsString(session, sftpChannel, expect);
+        int allowedIPs = StringUtils.countOccurrencesOf(wg0AsString, "AllowedIPs");
+        if (allowedIPs == 255) {
+            throw new Exception("Not allowed more keys!");
+        }
+        goToWGFolder(expect);
+        String peer = addNewPeer(getKeyByName(builder, expect, name, false), allowedIPs + 1 + "");
+        String wg0WithAddedPeer = wg0AsString + "\n" +peer;
+        ByteArrayInputStream stream = new ByteArrayInputStream(wg0WithAddedPeer.getBytes());
+
+        downgradeToUser(expect, session.getUserName(), "poker");
+        String uniqFolderName = getUniqFolderName();
+        makeTmpDir(uniqFolderName, session.getUserName(), expect);
+
+            sftpChannel.put(stream, "/home/" + session.getUserName() + "/" + uniqFolderName + "/wg0.conf");
+
+            upgradeToSU(expect, "poker");
+
+            moveFromTmpFolderToWGFolder(expect, session.getUserName(), uniqFolderName);
+
+            removeTmpDir(uniqFolderName, session.getUserName(), expect);
+
+
+        return true;
+    }
+
+    private static Expect getExpect(ChannelShell channel, StringBuilder builderIn, StringBuilder builderOut) throws IOException {
+        return new ExpectBuilder()
+                .withOutput(channel.getOutputStream())
+                .withInputs(channel.getInputStream(), channel.getExtInputStream())
+                .withEchoInput(builderIn)
+                .withEchoOutput(builderOut)
+                .withInputFilters(removeColors(), removeNonPrintable())
+                .withExceptionOnFailure()
+                .build();
     }
 
     @GetMapping("/getAllKeys")
@@ -656,7 +717,7 @@ public class Main {
         String peer = """
                 [Peer]
                 PublicKey = %s
-                AllowedIPs = %s
+                AllowedIPs = 10.0.0.%s
                 """;
         return String.format(peer, publicKey, ip);
     }
@@ -703,6 +764,7 @@ public class Main {
         }
 
     }
+
     private boolean downgradeToUser(Expect expect, String user, String password) {
         try {
             expect.sendLine("sudo su " + user);
