@@ -1,7 +1,5 @@
 package ru.priadkin.uimanegerwireguard.sshconnect.controller;
 
-import ch.qos.logback.classic.net.server.HardenedLoggingEventInputStream;
-import ch.qos.logback.core.read.ListAppender;
 import com.jcraft.jsch.ChannelExec;
 import com.jcraft.jsch.ChannelSftp;
 import com.jcraft.jsch.ChannelShell;
@@ -10,7 +8,6 @@ import com.jcraft.jsch.Session;
 import lombok.extern.slf4j.Slf4j;
 import net.sf.expectit.Expect;
 import net.sf.expectit.ExpectBuilder;
-import org.apache.commons.io.output.StringBuilderWriter;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -21,20 +18,12 @@ import ru.priadkin.uimanegerwireguard.sshconnect.domain.SSH;
 import ru.priadkin.uimanegerwireguard.sshconnect.domain.Status;
 import ru.priadkin.uimanegerwireguard.sshconnect.domain.StatusWG;
 
-import java.io.BufferedOutputStream;
 import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.io.EOFException;
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.io.OutputStream;
-import java.io.OutputStreamWriter;
-import java.io.StringReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -50,7 +39,6 @@ import java.util.stream.Stream;
 
 import static net.sf.expectit.filter.Filters.removeColors;
 import static net.sf.expectit.filter.Filters.removeNonPrintable;
-import static net.sf.expectit.matcher.Matchers.contains;
 import static net.sf.expectit.matcher.Matchers.regexp;
 
 @RestController
@@ -493,7 +481,8 @@ public class Main {
                     StringBuilder builderOut = new StringBuilder();
                     Expect expect = getExpect(channel, builderIn, builderOut);
                     try {
-                        addPeerToWg0Conf(v,expect,channel,sftpChannel, builderIn, name);
+                        addPeerToWg0Conf(v, expect, channel, sftpChannel, builderIn, name);
+                        enableIPForwarding(expect, builderIn);
                     } finally {
                         expect.close();
                         channel.disconnect();
@@ -506,7 +495,7 @@ public class Main {
         return status;
     }
 
-    private boolean addPeerToWg0Conf(Session session, Expect expect, ChannelShell channel, ChannelSftp sftpChannel,StringBuilder builder, String name) throws Exception {
+    private boolean addPeerToWg0Conf(Session session, Expect expect, ChannelShell channel, ChannelSftp sftpChannel, StringBuilder builder, String name) throws Exception {
         String wg0AsString = getWG0AsString(session, sftpChannel, expect);
         int allowedIPs = StringUtils.countOccurrencesOf(wg0AsString, "AllowedIPs");
         if (allowedIPs == 255) {
@@ -514,20 +503,20 @@ public class Main {
         }
         goToWGFolder(expect);
         String peer = addNewPeer(getKeyByName(builder, expect, name, false), allowedIPs + 1 + "");
-        String wg0WithAddedPeer = wg0AsString + "\n" +peer;
+        String wg0WithAddedPeer = wg0AsString + "\n" + peer;
         ByteArrayInputStream stream = new ByteArrayInputStream(wg0WithAddedPeer.getBytes());
 
         downgradeToUser(expect, session.getUserName(), "poker");
         String uniqFolderName = getUniqFolderName();
         makeTmpDir(uniqFolderName, session.getUserName(), expect);
 
-            sftpChannel.put(stream, "/home/" + session.getUserName() + "/" + uniqFolderName + "/wg0.conf");
+        sftpChannel.put(stream, "/home/" + session.getUserName() + "/" + uniqFolderName + "/wg0.conf");
 
-            upgradeToSU(expect, "poker");
+        upgradeToSU(expect, "poker");
 
-            moveFromTmpFolderToWGFolder(expect, session.getUserName(), uniqFolderName);
+        moveFromTmpFolderToWGFolder(expect, session.getUserName(), uniqFolderName);
 
-            removeTmpDir(uniqFolderName, session.getUserName(), expect);
+        removeTmpDir(uniqFolderName, session.getUserName(), expect);
 
 
         return true;
@@ -799,6 +788,22 @@ public class Main {
             log.error("Folder with name " + nameDir + " not deleted , reason ->" + e.getMessage());
             return false;
         }
+    }
+
+    private boolean enableIPForwarding(Expect expect, StringBuilder builder) {
+        try {
+            expect.sendLine("echo \"net.ipv4.ip_forward=1\" >> /etc/sysctl.conf");
+            Thread.sleep(100);
+            builder.setLength(0);
+            expect.sendLine("sysctl -p");
+            Thread.sleep(100);
+            if (builder.toString().contains("net.ipv4.ip_forward = 1")) {
+                return true;
+            }
+        } catch (Exception e) {
+            log.error("IPForwardind not set" + e.getMessage());
+        }
+        return false;
     }
 
 }
