@@ -8,6 +8,7 @@ import com.jcraft.jsch.Session;
 import lombok.extern.slf4j.Slf4j;
 import net.sf.expectit.Expect;
 import net.sf.expectit.ExpectBuilder;
+import net.sf.expectit.MultiResult;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -39,6 +40,8 @@ import java.util.stream.Stream;
 
 import static net.sf.expectit.filter.Filters.removeColors;
 import static net.sf.expectit.filter.Filters.removeNonPrintable;
+import static net.sf.expectit.matcher.Matchers.anyOf;
+import static net.sf.expectit.matcher.Matchers.contains;
 import static net.sf.expectit.matcher.Matchers.regexp;
 
 @RestController
@@ -575,6 +578,103 @@ public class Main {
             }
         });
         return status;
+    }
+
+    @GetMapping("/enablewgservice")
+    public Status enablewgservice(@RequestParam(name = "host") String host) {
+        Status status = new Status();
+        sessions.forEach((k, v) -> {
+            ChannelShell channel;
+            if (v.getHost().equals(host)) {
+                try {
+                    StringBuilder builderInp = new StringBuilder();
+                    StringBuilder builderOut = new StringBuilder();
+                    channel = (ChannelShell) v.openChannel("shell");
+
+                    channel.connect();
+                    Expect expect = new ExpectBuilder()
+                            .withTimeout(2, TimeUnit.SECONDS)
+                            .withOutput(channel.getOutputStream())
+                            .withInputs(channel.getInputStream(), channel.getExtInputStream())
+                            .withEchoInput(builderInp)
+                            .withEchoOutput(builderOut)
+                            .withInputFilters(removeColors(), removeNonPrintable())
+                            .withExceptionOnFailure()
+                            .build();
+                    try {
+                        boolean enable = isEnable(expect);
+                        if(!enable){
+                            enable(expect);
+                        }
+                        start(expect);
+                    } finally {
+                        expect.close();
+                        channel.disconnect();
+                    }
+
+
+                    System.out.println("");
+                } catch (Exception e) {
+                    System.out.println(e.getMessage());
+                }
+            }
+        });
+        return status;
+    }
+
+    private static boolean status(Expect expect, StringBuilder builder) throws IOException {
+        expect.sendLine("systemctl status wg-quick@wg0.service");
+        waitComplete(expect);
+        if (builder.toString().contains("active (")) {
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    private static void enable(Expect expect) throws IOException {
+        expect.sendLine("systemctl enable wg-quick@wg0.service");
+        waitComplete(expect);
+    }
+
+    private static boolean isEnable(Expect expect) throws IOException, InterruptedException {
+        expect.sendLine("systemctl list-unit-files | grep wg-quick@");
+        String input = expect.expect(contains("wg-quick@")).getInput();
+        if (input.contains("disabled")) {
+            return false;
+        } else {
+            return true;
+        }
+    }
+
+    private static void waitComplete(Expect expect) throws IOException {
+        int countwait = 1;
+        try {
+            while (true) {
+                MultiResult result = expect.expect(
+                        anyOf(
+                                contains("Password:"),
+                                contains("AUTHENTICATING FOR"),
+                                contains("AUTHENTICATION COMPLETE"),
+                                contains("AUTHENTICATION COMPLETE")
+                        ));
+                if (result.getInput().contains("Password:")) {
+                    expect.sendLine("poker");
+                }
+                if (result.getInput().contains("AUTHENTICATION COMPLETE")) {
+                    if (countwait == 0) {
+                        break;
+                    }
+                    countwait--;
+                }
+            }
+        } catch (Exception e) {
+        }
+    }
+
+    private static void start(Expect expect) throws IOException {
+        expect.sendLine("systemctl start wg-quick@wg0.service");
+        waitComplete(expect);
     }
 
     private List<String> splitWG0(String conf) {
