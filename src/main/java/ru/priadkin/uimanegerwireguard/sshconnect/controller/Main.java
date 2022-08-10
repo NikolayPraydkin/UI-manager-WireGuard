@@ -603,7 +603,7 @@ public class Main {
                             .build();
                     try {
                         boolean enable = isEnable(expect);
-                        if(!enable){
+                        if (!enable) {
                             enable(expect);
                         }
                         start(expect);
@@ -611,12 +611,50 @@ public class Main {
                         expect.close();
                         channel.disconnect();
                     }
-
-
-                    System.out.println("");
                 } catch (Exception e) {
-                    System.out.println(e.getMessage());
+                    log.error("Enable service with exception {}, host {} ", e.getMessage(), v.getHost());
                 }
+            }
+        });
+        return status;
+    }
+
+    @GetMapping("/disablewgservice")
+    public Status disablewgservice(@RequestParam(name = "host") String host) {
+        Status status = new Status();
+        sessions.forEach((k, v) -> {
+            ChannelShell channel;
+            if (v.getHost().equals(host)) {
+                try {
+                    StringBuilder builderInp = new StringBuilder();
+                    StringBuilder builderOut = new StringBuilder();
+                    channel = (ChannelShell) v.openChannel("shell");
+
+                    channel.connect();
+                    Expect expect = new ExpectBuilder()
+                            .withTimeout(2, TimeUnit.SECONDS)
+                            .withOutput(channel.getOutputStream())
+                            .withInputs(channel.getInputStream(), channel.getExtInputStream())
+                            .withEchoInput(builderInp)
+                            .withEchoOutput(builderOut)
+                            .withInputFilters(removeColors(), removeNonPrintable())
+                            .withExceptionOnFailure()
+                            .build();
+                    try {
+                        stop(expect);
+                        boolean enable = isEnable(expect);
+                        if (enable) {
+                            disable(expect);
+                        }
+                    } finally {
+                        expect.close();
+                        channel.disconnect();
+                    }
+
+                } catch (Exception e) {
+                    log.error("Disable service with exception {}, host {} ", e.getMessage(), v.getHost());
+                }
+
             }
         });
         return status;
@@ -634,6 +672,11 @@ public class Main {
 
     private static void enable(Expect expect) throws IOException {
         expect.sendLine("systemctl enable wg-quick@wg0.service");
+        waitComplete(expect);
+    }
+
+    private static void disable(Expect expect) throws IOException {
+        expect.sendLine("systemctl disable wg-quick@wg0.service");
         waitComplete(expect);
     }
 
@@ -674,6 +717,11 @@ public class Main {
 
     private static void start(Expect expect) throws IOException {
         expect.sendLine("systemctl start wg-quick@wg0.service");
+        waitComplete(expect);
+    }
+
+    private static void stop(Expect expect) throws IOException {
+        expect.sendLine("systemctl stop wg-quick@wg0.service");
         waitComplete(expect);
     }
 
