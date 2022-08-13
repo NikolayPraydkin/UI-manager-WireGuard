@@ -669,6 +669,15 @@ public class Main {
             return false;
         }
     }
+    private static boolean restart(Expect expect, StringBuilder builder) throws IOException {
+        expect.sendLine("systemctl restart wg-quick@wg0.service");
+        waitComplete(expect);
+        if (builder.toString().contains("active (")) {
+            return true;
+        } else {
+            return false;
+        }
+    }
 
     private static void enable(Expect expect) throws IOException {
         expect.sendLine("systemctl enable wg-quick@wg0.service");
