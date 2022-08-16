@@ -485,7 +485,9 @@ public class Main {
                     Expect expect = getExpect(channel, builderIn, builderOut);
                     try {
                         addPeerToWg0Conf(v, expect, channel, sftpChannel, builderIn, name);
+                        // todo:check ipforwarding
                         enableIPForwarding(expect, builderIn);
+                        restart(expect,builderIn);
                     } finally {
                         expect.close();
                         channel.disconnect();
