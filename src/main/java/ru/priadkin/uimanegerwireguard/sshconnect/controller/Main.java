@@ -854,6 +854,25 @@ public class Main {
         Files.write(path, outString.getBytes());
         return path;
     }
+    private static String makeClientWGConf(String privatekey, String address, String publickey, String endpoint) {
+        String toWrite = """
+                              [Interface]
+                              PrivateKey = %s
+                              Address = %s
+                              DNS = 1.1.1.1
+                              
+                              [Peer]
+                              PublicKey = %s
+                              AllowedIPs = 0.0.0.0/0
+                              Endpoint = %
+                              PersistentKeepalive = 20
+                """;
+
+        String outString = String.format(toWrite, privatekey, address, publickey, endpoint);
+//        Path path = Paths.get("wg0.conf");
+//        Files.write(path, outString.getBytes());
+        return outString;
+    }
 
     /**
      * @param publicKey - key
