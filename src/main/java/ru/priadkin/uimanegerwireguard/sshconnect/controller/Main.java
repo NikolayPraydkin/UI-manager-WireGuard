@@ -661,6 +661,43 @@ public class Main {
         });
         return status;
     }
+    @GetMapping("/getipinterface")
+    public Status getipinterface(@RequestParam(name = "host") String host) {
+        Status status = new Status();
+        sessions.forEach((k, v) -> {
+            ChannelShell channel;
+            if (v.getHost().equals(host)) {
+                try {
+                    StringBuilder builderInp = new StringBuilder();
+                    StringBuilder builderOut = new StringBuilder();
+                    channel = (ChannelShell) v.openChannel("shell");
+
+                    channel.connect();
+                    Expect expect = new ExpectBuilder()
+                            .withTimeout(2, TimeUnit.SECONDS)
+                            .withOutput(channel.getOutputStream())
+                            .withInputs(channel.getInputStream(), channel.getExtInputStream())
+                            .withEchoInput(builderInp)
+                            .withEchoOutput(builderOut)
+                            .withInputFilters(removeColors(), removeNonPrintable())
+                            .withExceptionOnFailure()
+                            .build();
+                    try {
+                       getIPInterface(expect);
+                       status.setMessage(builderInp.toString());
+                    } finally {
+                        expect.close();
+                        channel.disconnect();
+                    }
+
+                } catch (Exception e) {
+                    log.error("Disable service with exception {}, host {} ", e.getMessage(), v.getHost());
+                }
+
+            }
+        });
+        return status;
+    }
 
     private static boolean status(Expect expect, StringBuilder builder) throws IOException {
         expect.sendLine("systemctl status wg-quick@wg0.service");
@@ -835,6 +872,10 @@ public class Main {
             log.error("Not moved file to wg folder");
             throw new Exception("Not receive outpustream with file");
         }
+    }
+    private static void getIPInterface(Expect expect) throws Exception {
+            expect.sendLine("ip a");
+            Thread.sleep(1000);
     }
 
     private static Path prepareRawWG0ConfFile(String privatekey, String ip) throws IOException {
