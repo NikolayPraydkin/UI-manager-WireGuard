@@ -25,9 +25,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -410,11 +408,11 @@ public class Main {
                         }
                         removeTmpDir(tmpFolder, v.getUserName(), expect);
                         if (!exists || overwrite) {
-                            Path path = prepareRawWG0ConfFile(getKeyByName(builderIn, expect, namekey.isBlank() ? "wg" : namekey, true), ip.isBlank() ? "" : ip);
+                            ByteArrayInputStream stream = prepareRawWG0ConfFile(getKeyByName(builderIn, expect, namekey.isBlank() ? "wg" : namekey, true), ip.isBlank() ? "" : ip);
                             downgradeToUser(expect, v.getUserName(), "poker");
                             isTmpFolderCreated = makeTmpDir(tmpFolder, v.getUserName(), expect);
                             if (isTmpFolderCreated) {
-                                sftpChannel.put(path.toAbsolutePath().toString(), "/home/" + v.getUserName() + "/" + tmpFolder + "/wg0.conf");
+                                sftpChannel.put(stream, "/home/" + v.getUserName() + "/" + tmpFolder + "/wg0.conf");
 
                                 upgradeToSU(expect, "poker");
 
@@ -878,7 +876,7 @@ public class Main {
             Thread.sleep(1000);
     }
 
-    private static Path prepareRawWG0ConfFile(String privatekey, String ip) throws IOException {
+    private static ByteArrayInputStream prepareRawWG0ConfFile(String privatekey, String ip) throws IOException {
         String defaultIp = "10.0.0.1/24";
         String toWrite = """
                 [Interface]
@@ -891,9 +889,7 @@ public class Main {
                 PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE""";
 
         String outString = String.format(toWrite, privatekey, ip.isBlank() ? defaultIp : ip) + end;
-        Path path = Paths.get("wg0.conf");
-        Files.write(path, outString.getBytes());
-        return path;
+        return new ByteArrayInputStream(outString.getBytes(StandardCharsets.UTF_8));
     }
     private static String makeClientWGConf(String privatekey, String address, String publickey, String endpoint) {
         String toWrite = """
@@ -909,10 +905,7 @@ public class Main {
                               PersistentKeepalive = 20
                 """;
 
-        String outString = String.format(toWrite, privatekey, address, publickey, endpoint);
-//        Path path = Paths.get("wg0.conf");
-//        Files.write(path, outString.getBytes());
-        return outString;
+        return String.format(toWrite, privatekey, address, publickey, endpoint);
     }
 
     /**
