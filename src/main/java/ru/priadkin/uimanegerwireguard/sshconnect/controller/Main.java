@@ -408,7 +408,8 @@ public class Main {
                         }
                         removeTmpDir(tmpFolder, v.getUserName(), expect);
                         if (!exists || overwrite) {
-                            ByteArrayInputStream stream = prepareRawWG0ConfFile(getKeyByName(builderIn, expect, namekey.isBlank() ? "wg" : namekey, true), ip.isBlank() ? "" : ip);
+                            String getipinterface = getipinterface(v.getHost());
+                            ByteArrayInputStream stream = prepareRawWG0ConfFile(getKeyByName(builderIn, expect, namekey.isBlank() ? "wg" : namekey, true), ip.isBlank() ? "" : ip, getipinterface);
                             downgradeToUser(expect, v.getUserName(), "poker");
                             isTmpFolderCreated = makeTmpDir(tmpFolder, v.getUserName(), expect);
                             if (isTmpFolderCreated) {
@@ -659,9 +660,8 @@ public class Main {
         });
         return status;
     }
-    @GetMapping("/getipinterface")
-    public Status getipinterface(@RequestParam(name = "host") String host) {
-        Status status = new Status();
+    public String getipinterface(String host) {
+        List<String> result = new ArrayList<>();
         sessions.forEach((k, v) -> {
             ChannelShell channel;
             if (v.getHost().equals(host)) {
@@ -681,8 +681,14 @@ public class Main {
                             .withExceptionOnFailure()
                             .build();
                     try {
-                       getIPInterface(expect);
-                       status.setMessage(builderInp.toString());
+                        builderInp.setLength(0);
+                        getIPInterface(expect, host);
+                        String outString = builderInp.toString();
+                        String cutOne = outString.substring(outString.indexOf(host));
+                        String cutTwo = cutOne.substring(cutOne.indexOf("\r\n"));
+                        int indexTo = cutTwo.lastIndexOf("\r\n");
+                        int indexSpaceBeforeTargetInterface = cutTwo.lastIndexOf(" ", indexTo);
+                        result.add(cutTwo.substring(indexSpaceBeforeTargetInterface, indexTo).trim());
                     } finally {
                         expect.close();
                         channel.disconnect();
@@ -694,7 +700,7 @@ public class Main {
 
             }
         });
-        return status;
+        return result.size() > 0 ? result.get(0) : "";
     }
 
     private static boolean status(Expect expect, StringBuilder builder) throws IOException {
@@ -871,12 +877,13 @@ public class Main {
             throw new Exception("Not receive outpustream with file");
         }
     }
-    private static void getIPInterface(Expect expect) throws Exception {
-            expect.sendLine("ip a");
+    private static void getIPInterface(Expect expect, String host) throws Exception {
+            expect.sendLine("ip a | grep \"" + host + "\""
+              );
             Thread.sleep(1000);
     }
 
-    private static ByteArrayInputStream prepareRawWG0ConfFile(String privatekey, String ip) throws IOException {
+    private static ByteArrayInputStream prepareRawWG0ConfFile(String privatekey, String ip, String mainInterface) throws IOException {
         String defaultIp = "10.0.0.1/24";
         String toWrite = """
                 [Interface]
@@ -887,6 +894,9 @@ public class Main {
                 ListenPort = 51830
                 PostUp = iptables -A FORWARD -i %i -j ACCEPT; iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
                 PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE""";
+        if(!mainInterface.isBlank()){
+            end = end.replaceAll("eth0", mainInterface);
+        }
 
         String outString = String.format(toWrite, privatekey, ip.isBlank() ? defaultIp : ip) + end;
         return new ByteArrayInputStream(outString.getBytes(StandardCharsets.UTF_8));
