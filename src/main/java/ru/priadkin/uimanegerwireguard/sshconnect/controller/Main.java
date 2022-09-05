@@ -180,14 +180,14 @@ public class Main {
     }
 
     @GetMapping("/installwireguard")
-    public StatusWG installwg(@RequestParam(name = "host") String host) {
+    public StatusWG installwg(@RequestParam(name = "host") String host, @RequestParam(name = "supass") String supass) {
         StatusWG status = new StatusWG();
         sessions.forEach((k, v) -> {
             ChannelExec channel = null;
             if (v.getHost().equals(host)) {
                 try {
                     channel = (ChannelExec) v.openChannel("exec");
-                    channel.setCommand("echo poker | sudo -S apt install -y wireguard");
+                    channel.setCommand(String.format("echo %s | sudo -S apt install -y wireguard", supass));
                     InputStream in = channel.getInputStream();
                     InputStream errStream = channel.getErrStream();
 
@@ -238,14 +238,14 @@ public class Main {
     }
 
     @GetMapping("/removewireguard")
-    public StatusWG removewg(@RequestParam(name = "host") String host) {
+    public StatusWG removewg(@RequestParam(name = "host") String host, @RequestParam(name = "supass") String supass) {
         StatusWG status = new StatusWG();
         sessions.forEach((k, v) -> {
             ChannelExec channel = null;
             if (v.getHost().equals(host)) {
                 try {
                     channel = (ChannelExec) v.openChannel("exec");
-                    channel.setCommand("echo poker | sudo -S apt --purge remove -y wireguard; echo poker | sudo apt autoclean && sudo apt autoremove -y");
+                    channel.setCommand(String.format("echo %s | sudo -S apt --purge remove -y wireguard; echo %s | sudo apt autoclean && sudo apt autoremove -y",supass,supass));
 
                     InputStream in = channel.getInputStream();
                     InputStream errStream = channel.getErrStream();
@@ -297,7 +297,11 @@ public class Main {
     }
 
     @GetMapping("/generatekeyswg")
-    public Status generateKeysWG(@RequestParam(name = "host") String host, @RequestParam(name = "keyname", required = false) String keyname, @RequestParam(name = "overridekey", required = false) boolean overridekey) {
+    public Status generateKeysWG(@RequestParam(name = "host") String host,
+                                 @RequestParam(name = "keyname", required = false) String keyname,
+                                 @RequestParam(name = "overridekey", required = false) boolean overridekey,
+                                 @RequestParam(name = "supass") String supass
+    ) {
         String prefixNameKeys = "";
         if (keyname == null) {
             prefixNameKeys = UUID.randomUUID().toString();
@@ -329,7 +333,7 @@ public class Main {
                         expect.sendLine("sudo su");
                         Thread.sleep(100);
                         expect.expect(regexp(".*"));
-                        expect.sendLine("poker");
+                        expect.sendLine(supass);
                         Thread.sleep(100);
                         expect.expect(regexp(".*"));
                         expect.sendLine("cd /etc/wireguard");
@@ -368,11 +372,14 @@ public class Main {
         return status;
     }
 
+    //todo: check this method
     @GetMapping("/createwg0conf")
     public Status createwg0conf(@RequestParam(name = "host") String host
             , @RequestParam(name = "namekey", required = false, defaultValue = "wg") String namekey
             , @RequestParam(name = "ip", required = false, defaultValue = "") String ip
-            , @RequestParam(name = "overwriteexistingconf", defaultValue = "false") boolean overwrite
+            , @RequestParam(name = "overwriteexistingconf", defaultValue = "false") boolean overwrite,
+                                @RequestParam(name = "supass") String supass
+
     ) {
         Status status = new Status();
         sessions.forEach((k, v) -> {
@@ -400,7 +407,7 @@ public class Main {
                         boolean exists = false;
                         try {
                             isTmpFolderCreated = makeTmpDir(tmpFolder, v.getUserName(), expect);
-                            upgradeToSU(expect, "poker");
+                            upgradeToSU(expect, supass);
                             goToWGFolder(expect);
                             moveFromWGFolderToOutputStream(expect, sftpChannel, v.getUserName(), tmpFolder);
                             exists = true;
@@ -410,12 +417,12 @@ public class Main {
                         if (!exists || overwrite) {
                             String getipinterface = getipinterface(v.getHost());
                             ByteArrayInputStream stream = prepareRawWG0ConfFile(getKeyByName(builderIn, expect, namekey.isBlank() ? "wg" : namekey, true), ip.isBlank() ? "" : ip, getipinterface);
-                            downgradeToUser(expect, v.getUserName(), "poker");
+                            downgradeToUser(expect, v.getUserName(), v.getUserInfo().getPassword());
                             isTmpFolderCreated = makeTmpDir(tmpFolder, v.getUserName(), expect);
                             if (isTmpFolderCreated) {
                                 sftpChannel.put(stream, "/home/" + v.getUserName() + "/" + tmpFolder + "/wg0.conf");
 
-                                upgradeToSU(expect, "poker");
+                                upgradeToSU(expect, supass);
 
                                 moveFromTmpFolderToWGFolder(expect, v.getUserName(), tmpFolder);
 
@@ -442,7 +449,7 @@ public class Main {
     }
 
     @GetMapping("/getwg0conf")
-    public Status getwg0conf(@RequestParam(name = "host") String host) {
+    public Status getwg0conf(@RequestParam(name = "host") String host, @RequestParam(name = "suPass") String suPass) {
         Status status = new Status();
         sessions.forEach((k, v) -> {
             if (v.getHost().equals(host)) {
@@ -455,7 +462,7 @@ public class Main {
                     StringBuilder builderOut = new StringBuilder();
                     Expect expect = getExpect(channel, builderIn, builderOut);
                     try {
-                        String wg0AsString = getWG0AsString(v, sftpChannel, expect);
+                        String wg0AsString = getWG0AsString(v, sftpChannel, expect, suPass);
                         status.setMessage(wg0AsString);
                     } finally {
                         expect.close();
@@ -470,7 +477,10 @@ public class Main {
     }
 
     @GetMapping("/addPeerToWg0")
-    public Status addpeertowg0(@RequestParam(name = "host") String host, @RequestParam(name = "name") String name) {
+    public Status addpeertowg0(@RequestParam(name = "host") String host,
+                               @RequestParam(name = "name") String name,
+                               @RequestParam(name = "supass") String supass
+    ) {
         Status status = new Status();
         sessions.forEach((k, v) -> {
             if (v.getHost().equals(host)) {
@@ -483,10 +493,10 @@ public class Main {
                     StringBuilder builderOut = new StringBuilder();
                     Expect expect = getExpect(channel, builderIn, builderOut);
                     try {
-                        addPeerToWg0Conf(v, expect, channel, sftpChannel, builderIn, name);
+                        addPeerToWg0Conf(v, expect, channel, sftpChannel, builderIn, name, supass);
                         // todo:check ipforwarding
                         enableIPForwarding(expect, builderIn);
-                        restart(expect,builderIn);
+                        restart(expect,builderIn, v.getUserInfo().getPassword());
                     } finally {
                         expect.close();
                         channel.disconnect();
@@ -499,8 +509,8 @@ public class Main {
         return status;
     }
 
-    private boolean addPeerToWg0Conf(Session session, Expect expect, ChannelShell channel, ChannelSftp sftpChannel, StringBuilder builder, String name) throws Exception {
-        String wg0AsString = getWG0AsString(session, sftpChannel, expect);
+    private boolean addPeerToWg0Conf(Session session, Expect expect, ChannelShell channel, ChannelSftp sftpChannel, StringBuilder builder, String name, String suPass) throws Exception {
+        String wg0AsString = getWG0AsString(session, sftpChannel, expect, suPass);
         int allowedIPs = StringUtils.countOccurrencesOf(wg0AsString, "AllowedIPs");
         if (allowedIPs == 255) {
             throw new Exception("Not allowed more keys!");
@@ -516,7 +526,7 @@ public class Main {
 
         sftpChannel.put(stream, "/home/" + session.getUserName() + "/" + uniqFolderName + "/wg0.conf");
 
-        upgradeToSU(expect, "poker");
+        upgradeToSU(expect, suPass);
 
         moveFromTmpFolderToWGFolder(expect, session.getUserName(), uniqFolderName);
 
@@ -538,7 +548,7 @@ public class Main {
     }
 
     @GetMapping("/getAllKeys")
-    public Status getAllKeys(@RequestParam(name = "host") String host) {
+    public Status getAllKeys(@RequestParam(name = "host") String host, @RequestParam(name = "supass") String supass ) {
         Status status = new Status();
         sessions.forEach((k, v) -> {
             ChannelShell channel;
@@ -560,7 +570,7 @@ public class Main {
                             .build();
                     try {
 
-                        upgradeToSU(expect, "poker");
+                        upgradeToSU(expect, supass);
                         goToWGFolder(expect);
                         builder.setLength(0);
                         expect.sendLine("ls");
@@ -605,9 +615,9 @@ public class Main {
                     try {
                         boolean enable = isEnable(expect);
                         if (!enable) {
-                            enable(expect);
+                            enable(expect, v.getUserInfo().getPassword());
                         }
-                        start(expect);
+                        start(expect, v.getUserInfo().getPassword());
                     } finally {
                         expect.close();
                         channel.disconnect();
@@ -621,7 +631,7 @@ public class Main {
     }
 
     @GetMapping("/disablewgservice")
-    public Status disablewgservice(@RequestParam(name = "host") String host) {
+    public Status disablewgservice(@RequestParam(name = "host") String host, @RequestParam(name = "userPass") String userPass) {
         Status status = new Status();
         sessions.forEach((k, v) -> {
             ChannelShell channel;
@@ -642,10 +652,10 @@ public class Main {
                             .withExceptionOnFailure()
                             .build();
                     try {
-                        stop(expect);
+                        stop(expect, userPass);
                         boolean enable = isEnable(expect);
                         if (enable) {
-                            disable(expect);
+                            disable(expect, userPass);
                         }
                     } finally {
                         expect.close();
@@ -703,18 +713,18 @@ public class Main {
         return result.size() > 0 ? result.get(0) : "";
     }
 
-    private static boolean status(Expect expect, StringBuilder builder) throws IOException {
+    private static boolean status(Expect expect, StringBuilder builder, String userPass) throws IOException {
         expect.sendLine("systemctl status wg-quick@wg0.service");
-        waitComplete(expect);
+        waitComplete(expect,userPass);
         if (builder.toString().contains("active (")) {
             return true;
         } else {
             return false;
         }
     }
-    private static boolean restart(Expect expect, StringBuilder builder) throws IOException {
+    private static boolean restart(Expect expect, StringBuilder builder, String userPass) throws IOException {
         expect.sendLine("systemctl restart wg-quick@wg0.service");
-        waitComplete(expect);
+        waitComplete(expect, userPass);
         if (builder.toString().contains("active (")) {
             return true;
         } else {
@@ -722,14 +732,14 @@ public class Main {
         }
     }
 
-    private static void enable(Expect expect) throws IOException {
+    private static void enable(Expect expect, String userPass) throws IOException {
         expect.sendLine("systemctl enable wg-quick@wg0.service");
-        waitComplete(expect);
+        waitComplete(expect,userPass);
     }
 
-    private static void disable(Expect expect) throws IOException {
+    private static void disable(Expect expect, String userPass) throws IOException {
         expect.sendLine("systemctl disable wg-quick@wg0.service");
-        waitComplete(expect);
+        waitComplete(expect,userPass);
     }
 
     private static boolean isEnable(Expect expect) throws IOException, InterruptedException {
@@ -742,7 +752,7 @@ public class Main {
         }
     }
 
-    private static void waitComplete(Expect expect) throws IOException {
+    private static void waitComplete(Expect expect, String userPass) throws IOException {
         int countwait = 1;
         try {
             while (true) {
@@ -754,7 +764,7 @@ public class Main {
                                 contains("AUTHENTICATION COMPLETE")
                         ));
                 if (result.getInput().contains("Password:")) {
-                    expect.sendLine("poker");
+                    expect.sendLine(userPass);
                 }
                 if (result.getInput().contains("AUTHENTICATION COMPLETE")) {
                     if (countwait == 0) {
@@ -767,27 +777,27 @@ public class Main {
         }
     }
 
-    private static void start(Expect expect) throws IOException {
+    private static void start(Expect expect, String userPass) throws IOException {
         expect.sendLine("systemctl start wg-quick@wg0.service");
-        waitComplete(expect);
+        waitComplete(expect, userPass);
     }
 
-    private static void stop(Expect expect) throws IOException {
+    private static void stop(Expect expect, String userPass) throws IOException {
         expect.sendLine("systemctl stop wg-quick@wg0.service");
-        waitComplete(expect);
+        waitComplete(expect, userPass);
     }
 
     private List<String> splitWG0(String conf) {
         return Stream.of(conf.split("\n")).collect(Collectors.toList());
     }
 
-    private String getWG0AsString(Session v, ChannelSftp sftpChannel, Expect expect) throws Exception {
+    private String getWG0AsString(Session v, ChannelSftp sftpChannel, Expect expect, String suPass) throws Exception {
         boolean isTmpFolderCreated;
         String tmpFolder = getUniqFolderName();
         String result;
         isTmpFolderCreated = makeTmpDir(tmpFolder, v.getUserName(), expect);
         if (isTmpFolderCreated) {
-            upgradeToSU(expect, "poker");
+            upgradeToSU(expect, suPass);
             result = moveFromWGFolderToOutputStream(expect, sftpChannel, v.getUserName(), tmpFolder).toString();
             removeTmpDir(tmpFolder, v.getUserName(), expect);
         } else {
@@ -797,7 +807,7 @@ public class Main {
     }
 
     @GetMapping("/powerOff")
-    public String powerOff(@RequestParam(name = "host") String host) throws Exception {
+    public String powerOff(@RequestParam(name = "host") String host, @RequestParam(name = "suPass") String suPass) throws Exception {
         try {
             sessions.forEach((k, v) -> {
                 if (v.getHost().equals(host)) {
@@ -810,19 +820,13 @@ public class Main {
 
                         BufferedReader stdError = new BufferedReader(new
                                 InputStreamReader(channel.getErrStream()));
-                        channel.setCommand("echo poker | sudo -S poweroff");
+                        channel.setCommand(String.format("echo %s | sudo -S poweroff", suPass));
 
                         channel.connect();
 
                         while (channel.isConnected()) {
                             Thread.sleep(3000);
                         }
-
-                        String responseString = responseStream.toString();
-                        boolean ready = stdError.ready();
-                        String s = stdError.readLine();
-                        channel.getOutputStream().write("poker".getBytes());
-                        System.out.println(responseString);
 
 
                     } catch (JSchException e) {
