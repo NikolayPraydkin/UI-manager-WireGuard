@@ -19,12 +19,10 @@ import ru.priadkin.uimanegerwireguard.sshconnect.domain.SSH;
 import ru.priadkin.uimanegerwireguard.sshconnect.domain.Status;
 import ru.priadkin.uimanegerwireguard.sshconnect.domain.StatusWG;
 
-import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -34,7 +32,6 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 import static net.sf.expectit.filter.Filters.removeColors;
 import static net.sf.expectit.filter.Filters.removeNonPrintable;
@@ -131,7 +128,7 @@ public class Main {
 
         StatusWG status = new StatusWG();
         sessions.forEach((k, v) -> {
-            ChannelExec channel;
+            ChannelExec channel = null;
             if (v.getHost().equals(host)) {
                 try {
                     channel = (ChannelExec) v.openChannel("exec");
@@ -142,6 +139,7 @@ public class Main {
 
                     byte[] tmp = new byte[1024];
                     StringBuilder builder = new StringBuilder();
+                    int countWait = 3;
                     while (true) {
                         while (in.available() > 0) {
                             int i = in.read(tmp, 0, 1024);
@@ -153,9 +151,14 @@ public class Main {
                             System.out.println("exit-status: " + channel.getExitStatus());
                             break;
                         }
+                        if(countWait == 0){
+                            break;
+                        }
                         try {
                             Thread.sleep(1000);
+                            countWait--;
                         } catch (Exception ee) {
+                            log.error("Some error when waiting response {}", ee.getMessage());
                         }
                     }
                     String statusWG = builder.toString();
@@ -164,12 +167,12 @@ public class Main {
                     }
                     status.setMessage(statusWG);
 
-                    channel.disconnect();
-
-                } catch (JSchException e) {
+                } catch (JSchException | IOException e) {
                     throw new RuntimeException(e);
-                } catch (IOException e) {
-                    throw new RuntimeException(e);
+                }finally {
+                    if (channel != null) {
+                        channel.disconnect();
+                    }
                 }
             }
         });
@@ -283,12 +286,16 @@ public class Main {
                     }
                     status.setMessage(statusWG);
 
-                    channel.disconnect();
+
 
                 } catch (JSchException e) {
                     throw new RuntimeException(e);
                 } catch (IOException e) {
                     throw new RuntimeException(e);
+                }finally {
+                    if (channel != null) {
+                        channel.disconnect();
+                    }
                 }
             }
         });
@@ -304,7 +311,7 @@ public class Main {
                                  @RequestParam(name = "overridekey", required = false) boolean overridekey,
                                  @RequestParam(name = "supass") String supass
     ) {
-        String prefixNameKeys = "";
+        String prefixNameKeys;
         if (keyname == null) {
             prefixNameKeys = UUID.randomUUID().toString();
         } else {
@@ -329,7 +336,7 @@ public class Main {
                                     .withEchoOutput(builder)
                                     .withInputFilters(removeColors(), removeNonPrintable())
                                     .withExceptionOnFailure()
-                                    .build();
+                                    .build()
                     ) {
 
                         expect.sendLine("sudo su");
@@ -359,12 +366,15 @@ public class Main {
 
                     status.setMessage(statusWG);
 
-                    channel.disconnect();
 
                 } catch (JSchException e) {
                     throw new RuntimeException(e);
                 } catch (Exception e) {
                     status.setMessage(e.getMessage());
+                }finally {
+                    if (channel != null) {
+                        channel.disconnect();
+                    }
                 }
             }
         });
@@ -374,7 +384,6 @@ public class Main {
         return status;
     }
 
-    //todo: check this method
     @GetMapping("/createwg0conf")
     public Status createwg0conf(@RequestParam(name = "host") String host
             , @RequestParam(name = "namekey", required = false, defaultValue = "wg") String namekey
@@ -394,21 +403,20 @@ public class Main {
                     channel.connect();
                     StringBuilder builderOut = new StringBuilder();
                     StringBuilder builderIn = new StringBuilder();
-                    Expect expect = new ExpectBuilder()
+                    try (Expect expect = new ExpectBuilder()
                             .withOutput(channel.getOutputStream())
                             .withInputs(channel.getInputStream(), channel.getExtInputStream())
                             .withEchoInput(builderIn)
                             .withEchoOutput(builderOut)
                             .withInputFilters(removeColors(), removeNonPrintable())
                             .withExceptionOnFailure()
-                            .build();
-                    boolean isTmpFolderCreated = false;
-                    try {
+                            .build()) {
+                        boolean isTmpFolderCreated;
                         String tmpFolder = getUniqFolderName();
                         //check exist wg0.conf
                         boolean exists = false;
                         try {
-                            isTmpFolderCreated = makeTmpDir(tmpFolder, v.getUserName(), expect);
+                            makeTmpDir(tmpFolder, v.getUserName(), expect);
                             upgradeToSU(expect, supass);
                             goToWGFolder(expect);
                             moveFromWGFolderToOutputStream(expect, sftpChannel, v.getUserName(), tmpFolder);
@@ -438,7 +446,6 @@ public class Main {
                         }
                         status.setMessage("ok");
                     } finally {
-                        expect.close();
                         channel.disconnect();
                         sftpChannel.disconnect();
                     }
@@ -469,6 +476,7 @@ public class Main {
                     } finally {
                         expect.close();
                         channel.disconnect();
+                        sftpChannel.disconnect();
                     }
                 } catch (Exception e) {
                     System.out.println(e.getMessage());
@@ -502,6 +510,7 @@ public class Main {
                     } finally {
                         expect.close();
                         channel.disconnect();
+                        sftpChannel.disconnect();
                     }
                 } catch (Exception e) {
                     System.out.println(e.getMessage());
@@ -533,7 +542,6 @@ public class Main {
         moveFromTmpFolderToWGFolder(expect, session.getUserName(), uniqFolderName);
 
         removeTmpDir(uniqFolderName, session.getUserName(), expect);
-
 
         return true;
     }
@@ -584,9 +592,10 @@ public class Main {
                     } finally {
                         expect.close();
                         channel.disconnect();
+                        sftpChannel.disconnect();
                     }
                 } catch (Exception e) {
-                    System.out.println(e.getMessage());
+                    log.error("Error getAllKeys - {}", e.getMessage());
                 }
             }
         });
@@ -718,20 +727,12 @@ public class Main {
     private static boolean status(Expect expect, StringBuilder builder, String userPass) throws IOException {
         expect.sendLine("systemctl status wg-quick@wg0.service");
         waitComplete(expect,userPass);
-        if (builder.toString().contains("active (")) {
-            return true;
-        } else {
-            return false;
-        }
+        return builder.toString().contains("active (");
     }
     private static boolean restart(Expect expect, StringBuilder builder, String userPass) throws IOException {
         expect.sendLine("systemctl restart wg-quick@wg0.service");
         waitComplete(expect, userPass);
-        if (builder.toString().contains("active (")) {
-            return true;
-        } else {
-            return false;
-        }
+        return builder.toString().contains("active (");
     }
 
     private static void enable(Expect expect, String userPass) throws IOException {
@@ -747,14 +748,10 @@ public class Main {
     private static boolean isEnable(Expect expect) throws IOException, InterruptedException {
         expect.sendLine("systemctl list-unit-files | grep wg-quick@");
         String input = expect.expect(contains("wg-quick@")).getInput();
-        if (input.contains("disabled")) {
-            return false;
-        } else {
-            return true;
-        }
+        return !input.contains("disabled");
     }
 
-    private static void waitComplete(Expect expect, String userPass) throws IOException {
+    private static void waitComplete(Expect expect, String userPass) {
         int countwait = 1;
         try {
             while (true) {
@@ -789,10 +786,6 @@ public class Main {
         waitComplete(expect, userPass);
     }
 
-    private List<String> splitWG0(String conf) {
-        return Stream.of(conf.split("\n")).collect(Collectors.toList());
-    }
-
     private String getWG0AsString(Session v, ChannelSftp sftpChannel, Expect expect, String suPass) throws Exception {
         boolean isTmpFolderCreated;
         String tmpFolder = getUniqFolderName();
@@ -820,8 +813,6 @@ public class Main {
                         ByteArrayOutputStream responseStream = new ByteArrayOutputStream();
                         channel.setOutputStream(responseStream);
 
-                        BufferedReader stdError = new BufferedReader(new
-                                InputStreamReader(channel.getErrStream()));
                         channel.setCommand(String.format("echo %s | sudo -S poweroff", suPass));
 
                         channel.connect();
@@ -831,12 +822,12 @@ public class Main {
                         }
 
 
-                    } catch (JSchException e) {
+                    } catch (JSchException | InterruptedException e) {
                         throw new RuntimeException(e);
-                    } catch (InterruptedException e) {
-                        throw new RuntimeException(e);
-                    } catch (IOException e) {
-                        throw new RuntimeException(e);
+                    } finally {
+                        if (channel != null) {
+                            channel.disconnect();
+                        }
                     }
                 }
             });
@@ -848,25 +839,21 @@ public class Main {
         throw new Exception("Not power off by host " + host);
     }
 
-    private static boolean moveFromTmpFolderToWGFolder(Expect expect, String userName, String tmpFolder) throws IOException {
+    private static void moveFromTmpFolderToWGFolder(Expect expect, String userName, String tmpFolder) {
         try {
             expect.sendLine("cp " + "/home/" + userName + "/" + tmpFolder + "/wg0.conf" + " /etc/wireguard/wg0.conf");
             Thread.sleep(100);
-            return true;
         } catch (Exception e) {
             log.error("Not moved file to wg folder");
-            return false;
         }
     }
 
-    private static boolean goToWGFolder(Expect expect) throws IOException {
+    private static void goToWGFolder(Expect expect) {
         try {
             expect.sendLine("cd " + "/etc/wireguard/");
             Thread.sleep(100);
-            return true;
         } catch (Exception e) {
             log.error("Not go to wg folder");
-            return false;
         }
     }
 
@@ -889,7 +876,7 @@ public class Main {
             Thread.sleep(1000);
     }
 
-    private static ByteArrayInputStream prepareRawWG0ConfFile(String privatekey, String ip, String mainInterface) throws IOException {
+    private static ByteArrayInputStream prepareRawWG0ConfFile(String privatekey, String ip, String mainInterface) {
         String defaultIp = "10.0.0.1/24";
         String toWrite = """
                 [Interface]
@@ -927,10 +914,8 @@ public class Main {
     /**
      * @param publicKey - key
      * @param ip        ,sample 10.0.0.1/24
-     * @return
-     * @throws IOException
      */
-    private static String addNewPeer(String publicKey, String ip) throws IOException {
+    private static String addNewPeer(String publicKey, String ip) {
         String peer = """
                 [Peer]
                 PublicKey = %s
@@ -946,7 +931,7 @@ public class Main {
         expect.sendLine("ls");
         Thread.sleep(100);
         String trim = builder.toString().replaceAll("\r\n", " ").trim();
-        List<String> privatekey = Arrays.stream(trim.split(" ")).filter(i -> i.contains(finishNameKey)).collect(Collectors.toList());
+        List<String> privatekey = Arrays.stream(trim.split(" ")).filter(i -> i.contains(finishNameKey)).toList();
         if (privatekey.size() == 0) {
             throw new Exception("private key not found!");
         }
@@ -954,7 +939,7 @@ public class Main {
         Thread.sleep(100);
         expect.sendLine("cat " + finishNameKey);
         Thread.sleep(100);
-        String result = "";
+        String result;
         if (!builder.toString().isBlank()) {
             result = builder.toString().split("\r\n")[1].trim();
         } else {
@@ -968,30 +953,26 @@ public class Main {
         return UUID.randomUUID().toString();
     }
 
-    private boolean upgradeToSU(Expect expect, String password) {
+    private void upgradeToSU(Expect expect, String password) {
         try {
             expect.sendLine("sudo su");
             Thread.sleep(100);
             expect.sendLine(password);
             Thread.sleep(100);
-            return true;
         } catch (Exception e) {
             log.error("No upgrade to SU not created , reason ->" + e.getMessage());
-            return false;
         }
 
     }
 
-    private boolean downgradeToUser(Expect expect, String user, String password) {
+    private void downgradeToUser(Expect expect, String user, String password) {
         try {
             expect.sendLine("sudo su " + user);
             Thread.sleep(100);
             expect.sendLine(password);
             Thread.sleep(100);
-            return true;
         } catch (Exception e) {
             log.error("No downgrade to User not created , reason ->" + e.getMessage());
-            return false;
         }
 
     }
@@ -1007,18 +988,16 @@ public class Main {
         }
     }
 
-    private boolean removeTmpDir(String nameDir, String userName, Expect expect) {
+    private void removeTmpDir(String nameDir, String userName, Expect expect) {
         try {
             expect.sendLine("rm -rf /home/" + userName + "/" + nameDir);
             Thread.sleep(100);
-            return true;
         } catch (Exception e) {
             log.error("Folder with name " + nameDir + " not deleted , reason ->" + e.getMessage());
-            return false;
         }
     }
 
-    private boolean enableIPForwarding(Expect expect, StringBuilder builder) {
+    private void enableIPForwarding(Expect expect, StringBuilder builder) {
         try {
             expect.sendLine("echo \"net.ipv4.ip_forward=1\" >> /etc/sysctl.conf");
             Thread.sleep(100);
@@ -1026,12 +1005,10 @@ public class Main {
             expect.sendLine("sysctl -p");
             Thread.sleep(100);
             if (builder.toString().contains("net.ipv4.ip_forward = 1")) {
-                return true;
             }
         } catch (Exception e) {
             log.error("IPForwardind not set" + e.getMessage());
         }
-        return false;
     }
 
 }
