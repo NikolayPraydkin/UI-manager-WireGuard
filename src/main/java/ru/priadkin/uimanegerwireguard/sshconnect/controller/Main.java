@@ -222,12 +222,14 @@ public class Main {
                     }
                     status.setMessage(statusWG);
 
-                    channel.disconnect();
-
                 } catch (JSchException e) {
                     throw new RuntimeException(e);
                 } catch (IOException e) {
                     throw new RuntimeException(e);
+                }finally {
+                    if (channel != null) {
+                        channel.disconnect();
+                    }
                 }
             }
         });
