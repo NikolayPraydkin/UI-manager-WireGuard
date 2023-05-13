@@ -1,7 +1,13 @@
 <p>connection works!</p>
 
-<input [(ngModel)]="login" type="text" title="Login" />
+HOST <input [(ngModel)]="host" type="text" title="Host"/>
 <br>
-<input [(ngModel)]="password" type="text" title="Password" />
+PORT <input [(ngModel)]="port" type="text" title="Port(Optional)"/>
+<br>
+LOGIN <input [(ngModel)]="login" type="text" title="Login" />
+<br>
+PASSWORD <input [(ngModel)]="password" type="text" title="Password" />
+<br>
+RESULT {{result}}
 
 <button class="btn btn-primary" (click)="connect()">Connect</button>
