@@ -9,6 +9,8 @@ import lombok.extern.slf4j.Slf4j;
 import net.sf.expectit.Expect;
 import net.sf.expectit.ExpectBuilder;
 import net.sf.expectit.MultiResult;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -51,20 +53,24 @@ public class Main {
         this.ssh = ssh;
     }
 
+    @GetMapping("/hello")
+    public String geth(){
+        return "hello";
+    }
     @GetMapping("/connectSSHByPassword")
-    public String connectSSHByPassword(@RequestParam(name = "host") String host,
-                                       @RequestParam(name = "port", required = false) Integer port,
-                                       @RequestParam(name = "user") String user,
-                                       @RequestParam(name = "password") String password
+    public ResponseEntity<String> connectSSHByPassword(@RequestParam(name = "host") String host,
+                                                      @RequestParam(name = "port", required = false) Integer port,
+                                                      @RequestParam(name = "user") String user,
+                                                      @RequestParam(name = "password") String password
     ) {
         try {
             Session session = ssh.connectByPassword(host, port, user, password);
             UUID uuid = UUID.randomUUID();
             sessions.put(uuid, session);
-            return uuid.toString();
+            return ResponseEntity.ok(uuid.toString());
         } catch (Exception e) {
             log.error(e.getMessage());
-            return "Session not saved, try again!";
+            return ResponseEntity.status(HttpStatus.GATEWAY_TIMEOUT).body("Session not saved, try again!");
         }
 
     }
