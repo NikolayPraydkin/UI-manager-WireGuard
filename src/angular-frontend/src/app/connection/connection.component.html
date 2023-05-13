@@ -1,13 +1,24 @@
-<p>connection works!</p>
 
-HOST <input [(ngModel)]="host" type="text" title="Host"/>
-<br>
-PORT <input [(ngModel)]="port" type="text" title="Port(Optional)"/>
-<br>
-LOGIN <input [(ngModel)]="login" type="text" title="Login" />
-<br>
-PASSWORD <input [(ngModel)]="password" type="text" title="Password" />
-<br>
+<div class="input-group mb-1">
+  <span class="input-group-text" id="basic-addon1">HOST</span>
+ <input  [(ngModel)]="host" type="text" title="Host"/>
+</div>
+
+<div class="input-group mb-1">
+  <span class="input-group-text" id="basic-addon2">PORT</span>
+  <input [(ngModel)]="port" type="text" title="Port(Optional)"/>
+</div>
+
+<div class="input-group mb-1">
+  <span class="input-group-text" id="basic-addon3">LOGIN</span>
+  <input [(ngModel)]="login" type="text" title="Login"/>
+</div>
+
+<div class="input-group mb-1">
+  <span class="input-group-text" id="basic-addon4">PASSWORD</span>
+  <input [(ngModel)]="password" type="text" title="Password"/>
+</div>
+
 RESULT {{result}}
 
 <button class="btn btn-primary" (click)="connect()">Connect</button>
