@@ -5,11 +5,13 @@ import { AppComponent } from './app.component';
 import { ConnectionComponent } from './connection/connection.component';
 import {FormsModule} from "@angular/forms";
 import {HttpClientModule} from "@angular/common/http";
+import { ChildComponent } from './child/child.component';
 
 @NgModule({
   declarations: [
     AppComponent,
-    ConnectionComponent
+    ConnectionComponent,
+    ChildComponent
   ],
     imports: [
         BrowserModule,
@@ -17,6 +19,6 @@ import {HttpClientModule} from "@angular/common/http";
         HttpClientModule
     ],
   providers: [],
-  bootstrap: [AppComponent,ConnectionComponent]
+  bootstrap: [AppComponent]
 })
 export class AppModule { }
